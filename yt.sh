@@ -106,7 +106,7 @@ command="curl -s -o /dev/null -w '%{http_code}' \
     -X POST \
     -H 'Accept: application/vnd.github+json' \
     -H 'Authorization: token ${GITHUB_TOKEN}' \
-    https://api.github.com/repos/shekhawat2/RevancedYT/releases \
+    https://api.github.com/repos/dopaemon/RevancedYT/releases \
     -d '$(generate_release_data ${1})'"
 }
 
@@ -114,7 +114,7 @@ upload_release_file() {
 curl -s -o latest.json \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: token ${GITHUB_TOKEN}" \
-    https://api.github.com/repos/shekhawat2/RevancedYT/releases/latest
+    https://api.github.com/repos/dopaemon/RevancedYT/releases/latest
 
 url=`jq -r .upload_url latest.json | cut -d { -f'1'`
 command="curl -s -o /dev/null -w '%{http_code}' \
