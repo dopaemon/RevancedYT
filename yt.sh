@@ -201,6 +201,8 @@ java -jar $CLI \
     -m $INTEG \
     --experimental \
     -e microg-support \
+    -e amoled \
+    -e hide-autoplay-button \
     -e custom-branding || exit
 
 java -jar $CLI \
@@ -210,6 +212,8 @@ java -jar $CLI \
     -b $PATCHES \
     -m $INTEG \
     --experimental \
+    -e amoled \
+    -e hide-autoplay-button \
     -e music-microg-support || exit
 
 # NoRoot
@@ -220,6 +224,8 @@ java -jar $CLI \
     -b $PATCHES \
     -m $INTEG \
     --experimental \
+    -e amoled \
+    -e hide-autoplay-button \
     -e custom-branding || exit
 
 java -jar $CLI \
@@ -228,6 +234,8 @@ java -jar $CLI \
     --keystore=$CURDIR/revanced.keystore \
     -b $PATCHES \
     -m $INTEG \
+    -e amoled \
+    -e hide-autoplay-button \
     --experimental || exit
 
 # Create Module
