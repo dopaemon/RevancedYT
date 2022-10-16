@@ -8,4 +8,5 @@ The script will fetch the latest version available.
 ReVanced Tools compiled from their latest source.\
 Some patches maybe be incompatible with latest version and may not work as expected.
 
+Script Owner by @shekhawat2
 All Credits to **ReVancedTeam** for starting this project.
