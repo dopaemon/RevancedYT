@@ -108,17 +108,24 @@ ensure_bks_keystore() {
         0000000[12]) src_type="" ;;
         feedfeed) src_type=JKS ;;
     esac
+    # revanced-cli defaults the entry password to empty; only a converted keystore
+    # has a known entry password.
+    KEYSTORE_ENTRY_PASSWORD=""
+
     if [ -n "$src_type" ]; then
         status "Converting $src_type keystore to BKS..."
         local converted="$CURDIR/revanced-bks.keystore"
         rm -f "$converted"
         keytool -importkeystore -noprompt \
-            -srckeystore "$KEYSTORE" -srcstoretype "$src_type" -srcstorepass "$KEYSTORE_PASSWORD" \
-            -destkeystore "$converted" -deststoretype BKS -deststorepass "$KEYSTORE_PASSWORD" \
+            -srckeystore "$KEYSTORE" -srcstoretype "$src_type" \
+            -srcstorepass "$KEYSTORE_PASSWORD" -srckeypass "$KEYSTORE_PASSWORD" \
+            -destkeystore "$converted" -deststoretype BKS \
+            -deststorepass "$KEYSTORE_PASSWORD" -destkeypass "$KEYSTORE_PASSWORD" \
             -providerpath "$CLI" -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
             >> "$LOGFILE" 2>&1 || { error "Failed to convert keystore to BKS"; exit 1; }
 
         KEYSTORE=$converted
+        KEYSTORE_ENTRY_PASSWORD=$KEYSTORE_PASSWORD
         success "Keystore converted to BKS"
     fi
 
@@ -793,6 +800,7 @@ patch_apk_with_args() {
         --keystore="$KEYSTORE" \
         --keystore-password="$KEYSTORE_PASSWORD" \
         --keystore-entry-alias="$KEYSTORE_ALIAS" \
+        --keystore-entry-password="$KEYSTORE_ENTRY_PASSWORD" \
         -p "$PATCHES" \
         -b \
         --force \
