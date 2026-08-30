@@ -154,6 +154,7 @@ patch_tools
 
 # Build Tools
 build_tools
+ensure_bks_keystore
 
 # Cleanup
 prepare_workspace

@@ -92,7 +92,47 @@ init_keystore_env() {
         exit 1
     fi
 
+    KEYSTORE="$CURDIR/revanced.keystore"
     success "Keystore configuration verified"
+}
+
+# revanced-cli reads the keystore with BouncyCastle, which only accepts BKS.
+# Convert other formats (PKCS12/JKS) using the BC provider bundled in the CLI jar.
+ensure_bks_keystore() {
+    local magic
+    magic=$(od -An -tx1 -N4 "$KEYSTORE" | tr -d " \n")
+
+    local src_type=PKCS12
+    # BKS files start with the store version (1 or 2).
+    case "$magic" in
+        0000000[12]) src_type="" ;;
+        feedfeed) src_type=JKS ;;
+    esac
+    if [ -n "$src_type" ]; then
+        status "Converting $src_type keystore to BKS..."
+        local converted="$CURDIR/revanced-bks.keystore"
+        rm -f "$converted"
+        keytool -importkeystore -noprompt \
+            -srckeystore "$KEYSTORE" -srcstoretype "$src_type" -srcstorepass "$KEYSTORE_PASSWORD" \
+            -destkeystore "$converted" -deststoretype BKS -deststorepass "$KEYSTORE_PASSWORD" \
+            -providerpath "$CLI" -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
+            >> "$LOGFILE" 2>&1 || { error "Failed to convert keystore to BKS"; exit 1; }
+
+        KEYSTORE=$converted
+        success "Keystore converted to BKS"
+    fi
+
+    # Signing alias depends on how the keystore was generated; read it instead of guessing.
+    KEYSTORE_ALIAS=$(keytool -list -keystore "$KEYSTORE" -storetype BKS -storepass "$KEYSTORE_PASSWORD" \
+        -providerpath "$CLI" -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider 2>/dev/null \
+        | awk -F, '/PrivateKeyEntry/ { print $1; exit }')
+
+    if [ -z "$KEYSTORE_ALIAS" ]; then
+        error "No private key entry found in $KEYSTORE (wrong KEYSTORE_PASSWORD?)"
+        exit 1
+    fi
+
+    success "Signing alias: $KEYSTORE_ALIAS"
 }
 
 init_runtime_deps() {
@@ -750,9 +790,9 @@ patch_apk_with_args() {
 
     java -jar "$CLI" patch --purge \
         -o "$output_apk" \
-        --keystore="$CURDIR/revanced.keystore" \
+        --keystore="$KEYSTORE" \
         --keystore-password="$KEYSTORE_PASSWORD" \
-        --keystore-entry-alias=shekhawat2 \
+        --keystore-entry-alias="$KEYSTORE_ALIAS" \
         -p "$PATCHES" \
         -b \
         --force \
