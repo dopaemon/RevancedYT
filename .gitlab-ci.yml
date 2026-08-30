@@ -93,6 +93,7 @@ revanced_test:
     - export ORG_GRADLE_PROJECT_githubPackagesUsername="${GITHUB_ACTOR:-$GITLAB_USER_LOGIN}"
     - export ORG_GRADLE_PROJECT_githubPackagesPassword="${GITHUB_TOKEN}"
     - export KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"
+    - export PATCHES_TOKEN="${PATCHES_TOKEN:-}"
     - export FAST_BUILD="true"
     - ./revanced.sh test
   artifacts:
@@ -124,6 +125,7 @@ revanced_release:
     - export ORG_GRADLE_PROJECT_githubPackagesUsername="${GITHUB_ACTOR:-$GITLAB_USER_LOGIN}"
     - export ORG_GRADLE_PROJECT_githubPackagesPassword="${GITHUB_TOKEN}"
     - export KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"
+    - export PATCHES_TOKEN="${PATCHES_TOKEN:-}"
     - export FAST_BUILD="true"
     - ./revanced.sh
   artifacts:
@@ -152,6 +154,7 @@ gitlab_release:
     - export ORG_GRADLE_PROJECT_githubPackagesUsername="${GITHUB_ACTOR:-$GITLAB_USER_LOGIN}"
     - export ORG_GRADLE_PROJECT_githubPackagesPassword="${GITHUB_TOKEN}"
     - export KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-}"
+    - export PATCHES_TOKEN="${PATCHES_TOKEN:-}"
     - export FAST_BUILD="true"
     - ./revanced.sh
   artifacts:

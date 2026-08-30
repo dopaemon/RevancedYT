@@ -141,12 +141,8 @@ ensure_bks_keystore() {
 }
 
 init_runtime_deps() {
-    local deps="git wget curl unzip zip file java"
+    local deps="git wget curl unzip zip file java jq"
     local missing=""
-
-    if [ "$SKIP_UPLOAD" != "true" ]; then
-        deps="$deps jq"
-    fi
 
     for dep in $deps; do
         if ! command -v "$dep" >/dev/null 2>&1; then
@@ -405,6 +401,45 @@ build_tools() {
     success "ReVanced CLI: $CLI"
 }
 
+# Extra patch bundle kept in a private repository, applied alongside the
+# upstream patches.
+download_extra_patches() {
+    local token=${PATCHES_TOKEN:-${GITHUB_TOKEN:-}}
+    local meta asset_id asset_name
+
+    if [ -z "$token" ]; then
+        error "Missing PATCHES_TOKEN. A token with read access to ${EXTRA_PATCHES_REPO} is required."
+        exit 1
+    fi
+
+    status "Downloading extra patches from ${EXTRA_PATCHES_REPO}..."
+    meta=$(mktemp)
+    if ! curl -fsSL -H 'Accept: application/vnd.github+json' -H "Authorization: token ${token}" \
+        "https://api.github.com/repos/${EXTRA_PATCHES_REPO}/releases/latest" -o "$meta"; then
+        rm -f "$meta"
+        error "Failed to query the latest release of ${EXTRA_PATCHES_REPO}"
+        exit 1
+    fi
+
+    asset_id=$(jq -r 'first(.assets[] | select(.name | endswith(".rvp")) | .id) // empty' "$meta")
+    asset_name=$(jq -r 'first(.assets[] | select(.name | endswith(".rvp")) | .name) // empty' "$meta")
+    rm -f "$meta"
+
+    if [ -z "$asset_id" ]; then
+        error "No .rvp asset found in the latest release of ${EXTRA_PATCHES_REPO}"
+        exit 1
+    fi
+
+    EXTRA_PATCHES="$CURDIR/$asset_name"
+    if ! curl -fsSL -H 'Accept: application/octet-stream' -H "Authorization: token ${token}" \
+        "https://api.github.com/repos/${EXTRA_PATCHES_REPO}/releases/assets/${asset_id}" -o "$EXTRA_PATCHES"; then
+        error "Failed to download ${asset_name} from ${EXTRA_PATCHES_REPO}"
+        exit 1
+    fi
+
+    success "Extra patches: $asset_name"
+}
+
 # Sets per-target vars from indexed arrays for target index $1.
 # Arrays T_PACKAGE, T_APK_DIR, T_MODULE_ID, T_MODULE_NAME,
 # T_MODULE_DESC, T_UPDATE_JSON, T_UNINSTALL_FIRST, T_MODULE_PATH,
@@ -499,6 +534,7 @@ generate_message() {
     echo "" >>"$CURDIR/changelog.md"
     echo "**Tools:**" >>"$CURDIR/changelog.md"
     echo "revanced-patches: $PATCHESVER" >>"$CURDIR/changelog.md"
+    [ -n "${EXTRA_PATCHES:-}" ] && echo "extra-patches: $(basename "$EXTRA_PATCHES")" >>"$CURDIR/changelog.md" || true
     echo "revanced-cli: $CLIVER" >>"$CURDIR/changelog.md"
     echo "" >>"$CURDIR/changelog.md"
     cat >>"$CURDIR/changelog.md" <<'EOF'
@@ -788,6 +824,9 @@ patch_apk_with_args() {
     local input_apk=$2
     shift 2
 
+    local -a extra_patch_args=()
+    [ -n "${EXTRA_PATCHES:-}" ] && extra_patch_args=(-p "$EXTRA_PATCHES") || true
+
     local patch_output failure_lines patch_status monitor_status
     local -a pipeline_status
     local monitor_index
@@ -799,7 +838,7 @@ patch_apk_with_args() {
         --keystore-password="$KEYSTORE_PASSWORD" \
         --keystore-entry-alias="$KEYSTORE_ALIAS" \
         --keystore-entry-password="$KEYSTORE_ENTRY_PASSWORD" \
-        -p "$PATCHES" \
+        -p "$PATCHES" "${extra_patch_args[@]}" \
         -b \
         --force \
         "$@" \

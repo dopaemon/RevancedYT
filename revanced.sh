@@ -21,6 +21,7 @@ if [ "$IS_TEST" = "true" ]; then
 fi
 SKIP_UPLOAD=${SKIP_UPLOAD:-false}
 RELEASE_REPO=${RELEASE_REPO:-${GITHUB_REPOSITORY:-dopaemon/RevancedYT}}
+EXTRA_PATCHES_REPO=${EXTRA_PATCHES_REPO:-dopaemon/Patches}
 FAST_BUILD=${FAST_BUILD:-false}
 APKMIRROR_BASE_URL=${APKMIRROR_BASE_URL:-https://www.apkmirror.com}
 
@@ -155,6 +156,7 @@ patch_tools
 
 # Build Tools
 build_tools
+download_extra_patches
 ensure_bks_keystore
 
 # Cleanup
