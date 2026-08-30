@@ -108,8 +108,8 @@ ensure_bks_keystore() {
         0000000[12]) src_type="" ;;
         feedfeed) src_type=JKS ;;
     esac
-    # revanced-cli defaults the entry password to empty; only a converted keystore
-    # has a known entry password.
+    # revanced-cli defaults the entry password to empty; a converted keystore keeps
+    # the source entry password, which for PKCS12/JKS is the store password.
     KEYSTORE_ENTRY_PASSWORD=""
 
     if [ -n "$src_type" ]; then
@@ -117,10 +117,8 @@ ensure_bks_keystore() {
         local converted="$CURDIR/revanced-bks.keystore"
         rm -f "$converted"
         keytool -importkeystore -noprompt \
-            -srckeystore "$KEYSTORE" -srcstoretype "$src_type" \
-            -srcstorepass "$KEYSTORE_PASSWORD" -srckeypass "$KEYSTORE_PASSWORD" \
-            -destkeystore "$converted" -deststoretype BKS \
-            -deststorepass "$KEYSTORE_PASSWORD" -destkeypass "$KEYSTORE_PASSWORD" \
+            -srckeystore "$KEYSTORE" -srcstoretype "$src_type" -srcstorepass "$KEYSTORE_PASSWORD" \
+            -destkeystore "$converted" -deststoretype BKS -deststorepass "$KEYSTORE_PASSWORD" \
             -providerpath "$CLI" -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
             >> "$LOGFILE" 2>&1 || { error "Failed to convert keystore to BKS"; exit 1; }
 
