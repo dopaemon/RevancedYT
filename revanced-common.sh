@@ -536,7 +536,7 @@ RELEASE_CREATE_HTTP_CODE=
 
 create_release() {
     local release_num=$1
-    local url=https://api.github.com/repos/shekhawat2/RevancedYT/releases
+    local url=https://api.github.com/repos/${RELEASE_REPO}/releases
     local response_file response_body upload_url message
 
     response_file=$(mktemp)
@@ -578,7 +578,7 @@ extract_release_id_from_upload_url() {
 delete_release_asset_by_name() {
     local release_id=$1
     local asset_name=$2
-    local list_url="https://api.github.com/repos/shekhawat2/RevancedYT/releases/${release_id}/assets?per_page=100"
+    local list_url="https://api.github.com/repos/${RELEASE_REPO}/releases/${release_id}/assets?per_page=100"
     local list_file delete_code
     local asset_ids=()
 
@@ -602,7 +602,7 @@ delete_release_asset_by_name() {
             -X DELETE \
             -H 'Accept: application/vnd.github+json' \
             -H "Authorization: token ${GITHUB_TOKEN}" \
-            "https://api.github.com/repos/shekhawat2/RevancedYT/releases/assets/${asset_id}")
+            "https://api.github.com/repos/${RELEASE_REPO}/releases/assets/${asset_id}")
         if [ "$delete_code" = "204" ]; then
             log "Deleted existing asset ${asset_name} (id: ${asset_id}) before retry"
         else
@@ -863,7 +863,7 @@ create_module_zips() {
 generate_update_json_files() {
     status "Generating update JSON files..."
     local release_base_url
-    release_base_url="https://github.com/shekhawat2/RevancedYT/releases/latest/download"
+    release_base_url="https://github.com/${RELEASE_REPO}/releases/latest/download"
 
     for i in "${!T_PACKAGE[@]}"; do
         jq -n \
@@ -900,7 +900,7 @@ upload_release_assets_if_needed() {
 }
 
 prune_old_releases_and_tags() {
-    local repo=${RELEASE_REPO:-shekhawat2/RevancedYT}
+    local repo=$RELEASE_REPO
     local prune_days=${PRUNE_DAYS:-90}
     local dry_run=${PRUNE_DRY_RUN:-false}
     local cutoff_epoch cutoff_utc

@@ -20,6 +20,7 @@ if [ "$IS_TEST" = "true" ]; then
     RELEASE_TITLE_BASE="Revanced Test"
 fi
 SKIP_UPLOAD=${SKIP_UPLOAD:-false}
+RELEASE_REPO=${RELEASE_REPO:-${GITHUB_REPOSITORY:-dopaemon/RevancedYT}}
 FAST_BUILD=${FAST_BUILD:-false}
 APKMIRROR_BASE_URL=${APKMIRROR_BASE_URL:-https://www.apkmirror.com}
 
