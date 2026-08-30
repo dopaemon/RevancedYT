@@ -825,7 +825,8 @@ patch_apk_with_args() {
     shift 2
 
     local -a extra_patch_args=()
-    [ -n "${EXTRA_PATCHES:-}" ] && extra_patch_args=(-p "$EXTRA_PATCHES") || true
+    # -b (bypass signature verification) applies per patch bundle.
+    [ -n "${EXTRA_PATCHES:-}" ] && extra_patch_args=(-p "$EXTRA_PATCHES" -b) || true
 
     local patch_output failure_lines patch_status monitor_status
     local -a pipeline_status
@@ -838,8 +839,7 @@ patch_apk_with_args() {
         --keystore-password="$KEYSTORE_PASSWORD" \
         --keystore-entry-alias="$KEYSTORE_ALIAS" \
         --keystore-entry-password="$KEYSTORE_ENTRY_PASSWORD" \
-        -p "$PATCHES" "${extra_patch_args[@]}" \
-        -b \
+        -p "$PATCHES" -b "${extra_patch_args[@]}" \
         --force \
         "$@" \
         "$input_apk" 2>&1 | tee "$patch_output" | tee -a "$LOGFILE" | awk '
