@@ -324,7 +324,7 @@ dl_target_apk() {
 download_target_base_apk() {
     local i=$1
     local version=$2
-    local dest="$CURDIR/.module-build/${T_APK_DIR[$i]}-download.apk"
+    local dest="$CURDIR/.module-build/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
     local apk_dir="${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}"
 
     status "Downloading ${T_MODULE_NAME[$i]} APK"
@@ -359,22 +359,52 @@ download_targets_parallel() {
     done
 }
 
+# Patch channels - one build of every app per channel.
+CH_NAME=() CH_BRANCH=() CH_DIR=() CH_PATCHES=() CH_PATCHESVER=()
+
+# add_channel NAME BRANCH  (e.g. add_channel dev dev / add_channel stable main)
+add_channel() {
+    local c=${#CH_NAME[@]}
+    CH_NAME[$c]="$1"
+    CH_BRANCH[$c]="$2"
+    CH_DIR[$c]="revanced-patches-$1"
+    CH_PATCHES[$c]=""
+    CH_PATCHESVER[$c]=""
+}
+
 clone_tools() {
     status "Preparing ReVanced tools..."
-    clone revanced-patches dev revanced-patches &
-    patches_clone_pid=$!
+    local c pids=() labels=()
+    for c in "${!CH_NAME[@]}"; do
+        clone revanced-patches "${CH_BRANCH[$c]}" "${CH_DIR[$c]}" &
+        pids+=("$!"); labels+=("Updating revanced-patches (${CH_NAME[$c]})")
+    done
     clone revanced-cli dev revanced-cli &
-    cli_clone_pid=$!
-    wait_for_jobs "Updating revanced-patches" "$patches_clone_pid" "Updating revanced-cli" "$cli_clone_pid"
-    PATCHESVER=$(grep version "$CURDIR/revanced-patches/gradle.properties" | cut -d = -f 2 | sed 's/^[[:space:]]*//g')
+    pids+=("$!"); labels+=("Updating revanced-cli")
+
+    local job_args=() j
+    for j in "${!pids[@]}"; do job_args+=("${labels[$j]}" "${pids[$j]}"); done
+    wait_for_jobs "${job_args[@]}"
+
+    for c in "${!CH_NAME[@]}"; do
+        CH_PATCHESVER[$c]=$(grep version "$CURDIR/${CH_DIR[$c]}/gradle.properties" | cut -d = -f 2 | sed 's/^[[:space:]]*//g')
+        log "ReVanced Patches (${CH_NAME[$c]}) version: ${CH_PATCHESVER[$c]}"
+    done
     CLIVER=$(grep version "$CURDIR/revanced-cli/gradle.properties" | cut -d = -f 2 | sed 's/^[[:space:]]*//g')
-    log "ReVanced Patches version: $PATCHESVER"
     log "ReVanced CLI version: $CLIVER"
 }
 
 patch_tools() {
-    status "Patching ReVanced tools..."
-    PATCHFILE=$CURDIR/revanced-patches/extensions/shared/library/src/main/java/app/revanced/extension/shared/checks/CheckEnvironmentPatch.java
+    local c
+    for c in "${!CH_NAME[@]}"; do
+        patch_tools_channel "$c"
+    done
+}
+
+patch_tools_channel() {
+    local c=$1
+    status "Patching ReVanced tools (${CH_NAME[$c]})..."
+    PATCHFILE=$CURDIR/${CH_DIR[$c]}/extensions/shared/library/src/main/java/app/revanced/extension/shared/checks/CheckEnvironmentPatch.java
     FIND_START="    public static void check(Activity context) {"
     FIND_END="    }"
     oldStr=$(sed -n "/$FIND_START/,/^$FIND_END/p" "$PATCHFILE")
@@ -382,35 +412,58 @@ patch_tools() {
         Check.disableForever();
         return;
     }"
-    "$CURDIR/repstr.py" "$PATCHFILE" "$oldStr" "$newStr" || { error "Failed to patch tools"; exit 1; }
-    success "Tools patched successfully"
+    "$CURDIR/repstr.py" "$PATCHFILE" "$oldStr" "$newStr" || { error "Failed to patch tools (${CH_NAME[$c]})"; exit 1; }
+    success "Tools patched successfully (${CH_NAME[$c]})"
 }
 
 build_tools() {
     local patches_gradle_args=( -Dorg.gradle.java.home="$JAVA_HOME" build --parallel --build-cache )
     local cli_gradle_args=( -Dorg.gradle.java.home="$JAVA_HOME" build --parallel --build-cache )
+    local c
     if [ "$FAST_BUILD" = "true" ]; then
         # revanced-cli does not define a lint task; only skip lint for revanced-patches.
         patches_gradle_args+=( -x lint )
     fi
 
-    status "Building ReVanced Patches. This can take a while..."
-    cd "$CURDIR/revanced-patches" && ./gradlew "${patches_gradle_args[@]}" >> "$LOGFILE" 2>&1 || { error "Failed to build ReVanced Patches"; exit 1; }
+    for c in "${!CH_NAME[@]}"; do
+        status "Building ReVanced Patches (${CH_NAME[$c]}). This can take a while..."
+        cd "$CURDIR/${CH_DIR[$c]}" && ./gradlew "${patches_gradle_args[@]}" >> "$LOGFILE" 2>&1 \
+            || { error "Failed to build ReVanced Patches (${CH_NAME[$c]})"; exit 1; }
+        CH_PATCHES[$c]="$CURDIR/${CH_DIR[$c]}/patches/build/libs/patches-${CH_PATCHESVER[$c]}.rvp"
+    done
+
     status "Building ReVanced CLI..."
     cd "$CURDIR/revanced-cli" && ./gradlew "${cli_gradle_args[@]}" >> "$LOGFILE" 2>&1 || { error "Failed to build ReVanced CLI"; exit 1; }
-
-    PATCHES=$(ls "$CURDIR/revanced-patches/patches/build/libs/patches-$PATCHESVER.rvp")
     CLI=$(ls "$CURDIR/revanced-cli/build/libs/revanced-cli-$CLIVER-all.jar")
 
-    if [ ! -f "$PATCHES" ] || [ ! -f "$CLI" ]; then
+    for c in "${!CH_NAME[@]}"; do
+        if [ ! -f "${CH_PATCHES[$c]}" ]; then
+            error "Failed to build required ReVanced tool artifacts."
+            error "PATCHES (${CH_NAME[$c]})=${CH_PATCHES[$c]}"
+            exit 1
+        fi
+        success "ReVanced Patches (${CH_NAME[$c]}): ${CH_PATCHES[$c]}"
+    done
+
+    if [ ! -f "$CLI" ]; then
         error "Failed to build required ReVanced tool artifacts."
-        error "PATCHES=$PATCHES"
         error "CLI=$CLI"
         exit 1
     fi
-
-    success "ReVanced Patches: $PATCHES"
     success "ReVanced CLI: $CLI"
+
+    sync_target_patches
+}
+
+# Targets are expanded before the bundles exist; attach them once they are built.
+sync_target_patches() {
+    local c i
+    for c in "${!CH_NAME[@]}"; do
+        for i in "${!T_PACKAGE[@]}"; do
+            [ "${T_CHANNEL[$i]}" = "${CH_NAME[$c]}" ] && T_PATCHES[$i]="${CH_PATCHES[$c]}"
+        done
+    done
+    return 0
 }
 
 # Extra patch bundle kept in a private repository, applied alongside the
@@ -452,6 +505,46 @@ download_extra_patches() {
     success "Extra patches: $asset_name"
 }
 
+# Duplicates every registered target once per patch channel, so a single pass
+# over T_* builds both the dev and the stable variant of every app.
+expand_targets_for_channels() {
+    local c i n=${#T_PACKAGE[@]}
+    local p_package=("${T_PACKAGE[@]}") p_apk_dir=("${T_APK_DIR[@]}")
+    local p_display=("${T_DISPLAY_NAME[@]}") p_uninstall=("${T_UNINSTALL_FIRST[@]}")
+    local p_fallback=("${T_FALLBACK_VERSION[@]}")
+
+    T_PACKAGE=() T_APK_DIR=() T_MODULE_ID=() T_MODULE_NAME=() T_MODULE_DESC=()
+    T_UPDATE_JSON=() T_UPDATE_FILE=() T_UNINSTALL_FIRST=() T_LABEL=() T_DISPLAY_NAME=()
+    T_FALLBACK_VERSION=() T_RESOLVED_VERSION=() T_FALLBACK_PREFERRED=() T_VERSION=()
+    T_VERSIONCODE=() T_NAME=() T_MODULE_PATH=() T_CHANNEL=() T_PATCHES=()
+
+    for c in "${!CH_NAME[@]}"; do
+        local ch=${CH_NAME[$c]}
+        for i in $(seq 0 $((n - 1))); do
+            local display=${p_display[$i]} apk_dir=${p_apk_dir[$i]}
+            local label="Revanced${display/YouTube/YT}-${ch}"
+            local j=${#T_PACKAGE[@]}
+            T_PACKAGE[$j]="${p_package[$i]}"
+            T_APK_DIR[$j]="$apk_dir"
+            T_CHANNEL[$j]="$ch"
+            T_PATCHES[$j]="${CH_PATCHES[$c]}"
+            T_MODULE_ID[$j]="revanced-${apk_dir}-${ch}"
+            T_DISPLAY_NAME[$j]="$display"
+            T_MODULE_NAME[$j]="${display} Revanced (${ch})"
+            T_LABEL[$j]="$label"
+            T_MODULE_DESC[$j]="${label} Module by @Shekhawat2"
+            T_UPDATE_FILE[$j]="${apk_dir}-${ch}update.json"
+            T_UPDATE_JSON[$j]="https://github.com/${RELEASE_REPO}/releases/latest/download/${apk_dir}-${ch}update.json"
+            T_UNINSTALL_FIRST[$j]="${p_uninstall[$i]}"
+            T_FALLBACK_VERSION[$j]="${p_fallback[$i]}"
+            T_RESOLVED_VERSION[$j]=""
+            T_FALLBACK_PREFERRED[$j]="false"
+            T_MODULE_PATH[$j]="$MODULEBUILDROOT/${apk_dir}-${ch}"
+            T_VERSION[$j]="" T_VERSIONCODE[$j]="" T_NAME[$j]=""
+        done
+    done
+}
+
 # Sets per-target vars from indexed arrays for target index $1.
 # Arrays T_PACKAGE, T_APK_DIR, T_MODULE_ID, T_MODULE_NAME,
 # T_MODULE_DESC, T_UPDATE_JSON, T_UNINSTALL_FIRST, T_MODULE_PATH,
@@ -467,6 +560,7 @@ set_target_vars() {
     MODULE_UPDATE_JSON=${T_UPDATE_JSON[$i]}
     UNINSTALL_FIRST=${T_UNINSTALL_FIRST[$i]}
     MODULEPATH=${T_MODULE_PATH[$i]}
+    PATCHES=${T_PATCHES[$i]}
 }
 
 init_module_workspace() {
@@ -545,7 +639,10 @@ generate_message() {
     echo "**${RELEASE_TITLE_BASE}-${RELEASE_SERIES}-v${N}**" >"$CURDIR/changelog.md"
     echo "" >>"$CURDIR/changelog.md"
     echo "**Tools:**" >>"$CURDIR/changelog.md"
-    echo "revanced-patches: $PATCHESVER" >>"$CURDIR/changelog.md"
+    local c
+    for c in "${!CH_NAME[@]}"; do
+        echo "revanced-patches (${CH_NAME[$c]}): ${CH_PATCHESVER[$c]}" >>"$CURDIR/changelog.md"
+    done
     echo "revanced-cli: $CLIVER" >>"$CURDIR/changelog.md"
     echo "" >>"$CURDIR/changelog.md"
     cat >>"$CURDIR/changelog.md" <<'EOF'
@@ -723,7 +820,7 @@ resolve_supported_versions() {
         local pkg=${T_PACKAGE[$i]}
         local resolved_ver fallback_ver ver
         resolved_ver=$(java -jar "$CLI" list-patches \
-            -p "$PATCHES" \
+            -p "${T_PATCHES[$i]}" \
             -b \
             --filter-package-name="$pkg" \
             --packages \
@@ -771,10 +868,24 @@ download_base_apks() {
     local versions=() download_paths=()
     for i in "${!T_PACKAGE[@]}"; do
         versions[$i]=${T_VERSION[$i]}
-        download_paths[$i]="$CURDIR/.module-build/${T_APK_DIR[$i]}-download.apk"
+        download_paths[$i]="$CURDIR/.module-build/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
     done
 
-    download_targets_parallel versions download_paths "Downloading"
+    local j
+    for i in "${!T_PACKAGE[@]}"; do
+        # The same package/version is downloaded once and shared across channels.
+        for j in "${!T_PACKAGE[@]}"; do
+            if [ "$j" -lt "$i" ] && [ "${T_PACKAGE[$j]}" = "${T_PACKAGE[$i]}" ] && \
+               [ "${T_VERSION[$j]}" = "${T_VERSION[$i]}" ] && [ -s "${download_paths[$j]}" ]; then
+                log "Reusing ${T_MODULE_NAME[$j]} download for ${T_MODULE_NAME[$i]}"
+                cp "${download_paths[$j]}" "${download_paths[$i]}"
+                break
+            fi
+        done
+        [ -s "${download_paths[$i]}" ] && continue
+        status "Downloading ${T_MODULE_NAME[$i]} APK"
+        dl_target_apk "$i" "${T_VERSION[$i]}" "${download_paths[$i]}"
+    done
 
     for i in "${!T_PACKAGE[@]}"; do
         local dest=${download_paths[$i]}
@@ -1150,10 +1261,16 @@ notify_telegram() {
     base="https://github.com/${RELEASE_REPO}/releases/download/${tag}"
     date_str=$(date +"%d/%m/'%y")
 
+    local c
     apps=""
-    for i in "${!T_PACKAGE[@]}"; do
-        apps="${apps}• <b>${T_DISPLAY_NAME[$i]} ${T_VERSION[$i]}</b> — <a href=\"${base}/${T_NAME[$i]}-noroot.apk\">APK</a> | <a href=\"${base}/${T_NAME[$i]}.zip\">ZIP</a>
+    for c in "${!CH_NAME[@]}"; do
+        apps="${apps}<b>▪️ ${CH_NAME[$c]}</b> — <i>patches ${CH_PATCHESVER[$c]}</i>
 "
+        for i in "${!T_PACKAGE[@]}"; do
+            [ "${T_CHANNEL[$i]}" = "${CH_NAME[$c]}" ] || continue
+            apps="${apps}• <b>${T_DISPLAY_NAME[$i]} ${T_VERSION[$i]}</b> — <a href=\"${base}/${T_NAME[$i]}-noroot.apk\">APK</a> | <a href=\"${base}/${T_NAME[$i]}.zip\">ZIP</a>
+"
+        done
     done
 
     caption="#DoraCore #ReVanced #YouTube #YTMusic #NoRoot #Magisk
@@ -1168,7 +1285,7 @@ ${apps}
 • Disable YouTube auto-updates in Play Store.</blockquote>
 
 <b>Notes:</b>
-• revanced-patches: ${PATCHESVER}
+• <b>dev</b> = newest patches, • <b>stable</b> = released patches.
 • revanced-cli: ${CLIVER}
 
 <b>Credits:</b>

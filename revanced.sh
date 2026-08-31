@@ -33,6 +33,7 @@ T_MODULE_DESC=() T_UPDATE_JSON=() T_UPDATE_FILE=() T_UNINSTALL_FIRST=()
 T_LABEL=() T_DISPLAY_NAME=() T_FALLBACK_VERSION=()
 T_RESOLVED_VERSION=() T_FALLBACK_PREFERRED=()
 T_VERSION=() T_VERSIONCODE=() T_NAME=() T_MODULE_PATH=()
+T_CHANNEL=() T_PATCHES=()
 
 # add_target DISPLAY PACKAGE APK_DIR UNINSTALL_FIRST [FALLBACK_VERSION]
 #   DISPLAY         - human-readable app name   (e.g. "YouTube", "YouTubeMusic")
@@ -66,13 +67,20 @@ add_target() {
 # ---------------------------------------------------------------------------
 add_target "YouTube"      "com.google.android.youtube"                "youtube"       "false" "20.40.45"
 add_target "YouTubeMusic" "com.google.android.apps.youtube.music"     "youtube-music" "true"  "8.46.53"
+
+# Patch channels - every app is built once per channel.
 # ---------------------------------------------------------------------------
 
 source "$CURDIR/revanced-common.sh"
 
+add_channel dev    dev
+add_channel stable main
+expand_targets_for_channels
+
 patch_main_apks() {
     status "Patching apps..."
     for i in "${!T_PACKAGE[@]}"; do
+        local PATCHES="${T_PATCHES[$i]}"
         local output_apk="${T_MODULE_PATH[$i]}/${T_MODULE_ID[$i]}.apk"
         local input_apk="${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}/base.apk"
         local patch_success=false
@@ -113,6 +121,7 @@ create_noroot_apks() {
     local pids=() labels=()
     for i in "${!T_PACKAGE[@]}"; do
         (
+            PATCHES="${T_PATCHES[$i]}"
             zip -d "${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}/base.apk" 'lib/x86/*' 'lib/x86_64/*' >> "$LOGFILE" 2>&1 || true
             patch_apk_with_args \
                 "$CURDIR/${T_NAME[$i]}-noroot.apk" \
