@@ -556,13 +556,14 @@ generate_release_data() {
         --arg name "${RELEASE_TITLE_BASE}-${RELEASE_SERIES}-v${1}" \
         --rawfile body "$CURDIR/changelog.md" \
         --argjson draft "$DRAFT" \
+        --argjson prerelease "$PRERELEASE" \
         '{
             tag_name: $tag_name,
             target_commitish: $target_commitish,
             name: $name,
             body: $body,
             draft: $draft,
-            prerelease: false,
+            prerelease: $prerelease,
             generate_release_notes: false
         }'
 }
@@ -785,10 +786,48 @@ prepare_release_meta() {
     done
 }
 
+delete_draft_and_prereleases() {
+    local repo=$RELEASE_REPO
+    local list_file rid tag rcode deleted=0
+
+    status "Deleting existing draft and pre-releases from ${repo}..."
+    list_file=$(mktemp)
+    curl -sS \
+        -H 'Accept: application/vnd.github+json' \
+        -H "Authorization: token ${GITHUB_TOKEN}" \
+        "https://api.github.com/repos/${repo}/releases?per_page=100" \
+        | jq -r '.[] | select(.draft or .prerelease) | [.id, .tag_name] | @tsv' >"$list_file"
+
+    while IFS=$'\t' read -r rid tag; do
+        [ -z "$rid" ] && continue
+        rcode=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X DELETE \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${repo}/releases/${rid}")
+        if [ "$rcode" = "204" ]; then
+            deleted=$((deleted + 1))
+        elif [ "$rcode" != "404" ]; then
+            warn "Failed deleting release ${rid} (HTTP ${rcode})"
+            continue
+        fi
+        if [ -n "${tag:-}" ] && [ "$tag" != "null" ]; then
+            curl -sS -o /dev/null \
+                -X DELETE \
+                -H 'Accept: application/vnd.github+json' \
+                -H "Authorization: token ${GITHUB_TOKEN}" \
+                "https://api.github.com/repos/${repo}/git/refs/tags/${tag}" || true
+        fi
+    done <"$list_file"
+    rm -f "$list_file"
+    success "Removed ${deleted} draft/pre-release(s)"
+}
+
 create_release_if_needed() {
     if [ "$SKIP_UPLOAD" = "true" ]; then
         log "Skipping GitHub release creation/upload (SKIP_UPLOAD=true)"
     elif [[ ${GITHUB_TOKEN:-} ]]; then
+        [ "$IS_TEST" = "true" ] || delete_draft_and_prereleases
         status "Creating GitHub release..."
         for N in {1..9}; do
             for i in "${!T_PACKAGE[@]}"; do

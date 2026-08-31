@@ -12,7 +12,8 @@ IS_TEST=false
 if [ "$MODE" = "test" ]; then
     IS_TEST=true
 fi
-DRAFT=$IS_TEST
+DRAFT=false
+PRERELEASE=$IS_TEST
 RELEASE_SERIES=$DATE
 RELEASE_TITLE_BASE="Revanced"
 if [ "$IS_TEST" = "true" ]; then
