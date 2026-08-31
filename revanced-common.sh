@@ -256,9 +256,9 @@ download_apkmirror_apk() {
 
     release_html=$(req "$release_url" - 2>/dev/null || true)
 
-    variant_path=$(printf '%s' "$release_html" | grep arm64 -A30 | grep '>APK<' -A20 | grep android-apk-download | head -1 | sed 's#.*-release/##g;s#/".*##g')
+    variant_path=$(printf '%s' "$release_html" | grep arm64 -A30 | grep '>APK<' -A20 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
     if [ -z "$variant_path" ]; then
-        variant_path=$(printf '%s' "$release_html" | grep Variant -A50 | grep '>APK<' -A2 | grep android-apk-download | head -1 | sed 's#.*-release/##g;s#/".*##g')
+        variant_path=$(printf '%s' "$release_html" | grep Variant -A50 | grep '>APK<' -A2 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
     fi
     [ -z "$variant_path" ] && { error "Failed to find APK variant for ${app_name} ${version}"; return 1; }
 
@@ -302,11 +302,23 @@ dl_target_apk() {
     local package=${T_PACKAGE[$i]}
     local app_name=${T_DISPLAY_NAME[$i]}
 
-    download_apkmirror_apk \
-        "$app_name" \
-        "$package" \
-        "$version" \
-        "$out_path" || exit 1
+    local resolved=${T_RESOLVED_VERSION[$i]:-}
+    local attempt
+
+    # APKMirror occasionally serves a Cloudflare interstitial; retry before giving up.
+    for attempt in 1 2; do
+        download_apkmirror_apk "$app_name" "$package" "$version" "$out_path" && return 0
+        if [ "$attempt" -eq 1 ]; then sleep 10; fi
+    done
+
+    if [ -n "$resolved" ] && [ "$resolved" != "$version" ]; then
+        warn "${app_name} ${version} is not downloadable; falling back to resolved ${resolved}"
+        T_VERSION[$i]="$resolved"
+        T_FALLBACK_PREFERRED[$i]="false"
+        download_apkmirror_apk "$app_name" "$package" "$resolved" "$out_path" && return 0
+    fi
+
+    exit 1
 }
 
 download_target_base_apk() {
