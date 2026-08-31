@@ -534,7 +534,6 @@ generate_message() {
     echo "" >>"$CURDIR/changelog.md"
     echo "**Tools:**" >>"$CURDIR/changelog.md"
     echo "revanced-patches: $PATCHESVER" >>"$CURDIR/changelog.md"
-    [ -n "${EXTRA_PATCHES:-}" ] && echo "extra-patches: $(basename "$EXTRA_PATCHES")" >>"$CURDIR/changelog.md" || true
     echo "revanced-cli: $CLIVER" >>"$CURDIR/changelog.md"
     echo "" >>"$CURDIR/changelog.md"
     cat >>"$CURDIR/changelog.md" <<'EOF'
