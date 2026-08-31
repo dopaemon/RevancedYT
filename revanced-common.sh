@@ -1123,7 +1123,7 @@ notify_telegram() {
     local chat token tag base date_str caption apps i
     token=${TELEGRAM_TOKEN:-}
     chat=${TELEGRAM_CHAT:-}
-    [ -n "$chat" ] || { [ "$IS_TEST" = "true" ] && chat="@DoraCoreCI" || chat="@TotoroKernel"; }
+    [ -n "$chat" ] || { [ "$IS_TEST" = "true" ] && chat="@DoraCoreCI" || chat="@TotoroNK"; }
 
     if [ -z "$token" ]; then
         warn "TELEGRAM_TOKEN is not set. Skipping Telegram post."
