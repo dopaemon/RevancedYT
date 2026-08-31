@@ -1080,3 +1080,62 @@ prune_old_releases_and_tags() {
 
     success "Pruning complete. No releases older than ${prune_days} days with assets remain"
 }
+notify_telegram() {
+    local chat token tag base date_str caption apps i
+    token=${TELEGRAM_TOKEN:-}
+    chat=${TELEGRAM_CHAT:-}
+    [ -n "$chat" ] || { [ "$IS_TEST" = "true" ] && chat="@DoraCoreCI" || chat="@TotoroKernel"; }
+
+    if [ -z "$token" ]; then
+        warn "TELEGRAM_TOKEN is not set. Skipping Telegram post."
+        return 0
+    fi
+    if [ "$SKIP_UPLOAD" = "true" ] || [ -z "${GITHUB_TOKEN:-}" ]; then
+        log "Skipping Telegram post (no release was published)"
+        return 0
+    fi
+
+    tag="${RELEASE_SERIES}_v${N}"
+    base="https://github.com/${RELEASE_REPO}/releases/download/${tag}"
+    date_str=$(date +"%d/%m/'%y")
+
+    apps=""
+    for i in "${!T_PACKAGE[@]}"; do
+        apps="${apps}• <b>${T_DISPLAY_NAME[$i]} ${T_VERSION[$i]}</b> — <a href=\"${base}/${T_NAME[$i]}-noroot.apk\">APK</a> | <a href=\"${base}/${T_NAME[$i]}.zip\">ZIP</a>
+"
+    done
+
+    caption="#DoraCore #ReVanced #YouTube #YTMusic #NoRoot #Magisk
+<b>ReVanced | YouTube &amp; YT Music</b>
+<b>Updated:</b> <i>${date_str}</i>
+
+📥 <b>Download:</b> <a href=\"https://github.com/${RELEASE_REPO}/releases/tag/${tag}\">Release</a>
+${apps}
+<blockquote><b>Caution:</b>
+• APK (no-root) requires <a href=\"https://github.com/ReVanced/GmsCore/releases/latest\">ReVanced MicroG</a>.
+• ZIP (root) — flash in Magisk, no reboot needed.
+• Disable YouTube auto-updates in Play Store.</blockquote>
+
+<b>Notes:</b>
+• revanced-patches: ${PATCHESVER}
+• revanced-cli: ${CLIVER}
+
+<b>Credits:</b>
+• @Shekhawat2
+
+<b>By</b> <a href=\"https://t.me/KernelPanix\">KernelPanix</a>
+<b>Follow</b> <a href=\"https://t.me/totoronk\">DoraCore</a>
+<b>Join</b> <a href=\"https://t.me/totorokernel\">DoraCore Community</a>"
+
+    status "Posting release to Telegram ($chat)..."
+    if curl -sS --fail-with-body \
+        --form-string chat_id="$chat" \
+        -F parse_mode=HTML \
+        -F photo=@"$CURDIR/banner.png" \
+        --form-string caption="$caption" \
+        "https://api.telegram.org/bot${token}/sendPhoto" >>"$LOGFILE" 2>&1; then
+        success "Posted release to Telegram ($chat)"
+    else
+        warn "Telegram post failed; see $LOGFILE"
+    fi
+}

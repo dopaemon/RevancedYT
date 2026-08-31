@@ -48,6 +48,7 @@ jobs:
           ORG_GRADLE_PROJECT_githubPackagesPassword: ${{ secrets.GITHUB_TOKEN }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           FAST_BUILD: "true"
         run: |
           ./revanced.sh test

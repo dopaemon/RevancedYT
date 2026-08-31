@@ -171,3 +171,4 @@ create_module_zips
 create_noroot_apks
 generate_update_json_files
 upload_release_assets_if_needed
+notify_telegram
