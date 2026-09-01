@@ -218,19 +218,26 @@ req() {
 # find_apkmirror_release_url PACKAGE VERSION
 # Searches APKMirror using last segment of package name + version.
 # e.g. com.google.android.youtube 20.14.43 -> searches "youtube+20.14.43"
+# find_apkmirror_release_url PACKAGE VERSION [SEARCH_TERM] [SLUG_FILTER]
+# SEARCH_TERM defaults to the last dot-segment of the package (works for apps
+# whose APKMirror listing is named after it; TikTok and friends need it set).
+# SLUG_FILTER keeps only hrefs containing it, e.g. "/tik-tok/".
 find_apkmirror_release_url() {
     local package=$1
     local version=$2
+    local search_term=${3:-}
+    local slug_filter=${4:-}
     local ver_dashed="${version//./-}"
     local app_name search_html release_url
 
     # Use only the last dot-segment so no dots appear in the query (avoids WAF 403)
-    app_name="${package##*.}"
+    app_name=${search_term:-${package##*.}}
 
     search_html=$(req "${APKMIRROR_BASE_URL}/?s=${app_name}+${version}&post_type=app_release&searchtype=apk" - 2>/dev/null || true)
     release_url=$(printf '%s' "$search_html" \
         | grep -o 'href="/apk/[^"]*-'"${ver_dashed}"'-release/"' \
         | grep -v '#' \
+        | { [ -n "$slug_filter" ] && grep -F "$slug_filter" || cat; } \
         | sed 's/href="//;s/"$//' | head -1)
     [ -n "$release_url" ] && printf '%s%s' "$APKMIRROR_BASE_URL" "$release_url"
 }
@@ -240,6 +247,8 @@ download_apkmirror_apk() {
     local package=$2
     local version=$3
     local out_path=$4
+    local search_term=${5:-}
+    local slug_filter=${6:-}
     local release_url release_html
     local variant_path dl_key_path
     local url final_path extra_path
@@ -247,7 +256,7 @@ download_apkmirror_apk() {
     rm -rf "$out_path"
     log "Downloading ${app_name} ${version} (package: ${package})..."
 
-    release_url=$(find_apkmirror_release_url "$package" "$version")
+    release_url=$(find_apkmirror_release_url "$package" "$version" "$search_term" "$slug_filter")
     if [ -z "$release_url" ]; then
         error "Failed to find APKMirror release page for ${package} ${version}"
         return 1
@@ -256,14 +265,25 @@ download_apkmirror_apk() {
 
     release_html=$(req "$release_url" - 2>/dev/null || true)
 
-    variant_path=$(printf '%s' "$release_html" | grep arm64 -A30 | grep '>APK<' -A20 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
+    # Apps whose base.apk carries a second resource package (TikTok: 0x55) lose
+    # it through apktool, so grab the split bundle and merge it back instead.
+    local variant_label='>APK<'
+    [ "${PREFER_BUNDLE:-false}" = "true" ] && variant_label='>BUNDLE<'
+
+    variant_path=$(printf '%s' "$release_html" | grep arm64 -A30 | grep "$variant_label" -A20 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
     if [ -z "$variant_path" ]; then
-        variant_path=$(printf '%s' "$release_html" | grep Variant -A50 | grep '>APK<' -A2 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
+        variant_path=$(printf '%s' "$release_html" | grep Variant -A50 | grep "$variant_label" -A2 | grep -o '[a-z0-9-]*-android-apk-download/' | head -1)
     fi
     [ -z "$variant_path" ] && { error "Failed to find APK variant for ${app_name} ${version}"; return 1; }
 
     url="${release_url}${variant_path}"
-    dl_key_path=$(req "$url" - | grep "downloadButton" | grep "forcebaseapk" | sed -n 's;.*href="\(.*key=[^"]*\)".*;\1;p' | head -1 | sed 's/&amp;/\&/g')
+    if [ "${PREFER_BUNDLE:-false}" = "true" ]; then
+        # The forcebaseapk link is the "download base APK only" shortcut; the
+        # plain download button gives the whole bundle.
+        dl_key_path=$(req "$url" - | grep "downloadButton" | grep -v "forcebaseapk" | sed -n 's;.*href="\(.*key=[^"]*\)".*;\1;p' | head -1 | sed 's/&amp;/\&/g')
+    else
+        dl_key_path=$(req "$url" - | grep "downloadButton" | grep "forcebaseapk" | sed -n 's;.*href="\(.*key=[^"]*\)".*;\1;p' | head -1 | sed 's/&amp;/\&/g')
+    fi
     [ -z "$dl_key_path" ] && { error "Failed to extract download key for ${app_name} ${version}"; return 1; }
 
     url="${APKMIRROR_BASE_URL}${dl_key_path}"
@@ -301,13 +321,15 @@ dl_target_apk() {
     local out_path=$3
     local package=${T_PACKAGE[$i]}
     local app_name=${T_DISPLAY_NAME[$i]}
+    local search_term=${T_APKM_NAME[$i]:-}
+    local slug_filter=${T_APKM_SLUG[$i]:-}
 
     local resolved=${T_RESOLVED_VERSION[$i]:-}
     local attempt
 
     # APKMirror occasionally serves a Cloudflare interstitial; retry before giving up.
     for attempt in 1 2; do
-        download_apkmirror_apk "$app_name" "$package" "$version" "$out_path" && return 0
+        download_apkmirror_apk "$app_name" "$package" "$version" "$out_path" "$search_term" "$slug_filter" && return 0
         if [ "$attempt" -eq 1 ]; then sleep 10; fi
     done
 
@@ -315,28 +337,80 @@ dl_target_apk() {
         warn "${app_name} ${version} is not downloadable; falling back to resolved ${resolved}"
         T_VERSION[$i]="$resolved"
         T_FALLBACK_PREFERRED[$i]="false"
-        download_apkmirror_apk "$app_name" "$package" "$resolved" "$out_path" && return 0
+        download_apkmirror_apk "$app_name" "$package" "$resolved" "$out_path" "$search_term" "$slug_filter" && return 0
     fi
 
     exit 1
 }
 
+# An APKMirror download is either a plain APK or a split bundle. A bundle has
+# APKs at its root; a plain APK only ever has them nested (assets/*.apk), so
+# matching "apk" anywhere in the listing misdetects apps like TikTok.
+# Some apps (TikTok) ship res/*.png entries that hold other formats; aapt2
+# refuses to recompile them, so repair them before patching.
+sanitize_apk_pngs() {
+    local apk=$1
+    [ "${SANITIZE_PNGS:-false}" = "true" ] || return 0
+    status "Repairing invalid PNG resources in $(basename "$apk")..."
+    python3 "$CURDIR/fixpng.py" "$apk" 2>&1 | tee -a "$LOGFILE" >/dev/null \
+        || { error "Failed to repair PNG resources in $(basename "$apk")"; exit 1; }
+}
+
+is_apk_bundle() {
+    unzip -Z1 "$1" 2>/dev/null | grep -qE '^[^/]+\.apk$'
+}
+
+# A bundle's resources are spread across its splits: patching base.apk alone
+# leaves manifest references (TikTok: package id 0x55) dangling, so merge the
+# splits back into a single APK first.
+merge_apk_splits() {
+    local apk_dir=$1
+    local jar="$CURDIR/APKEditor.jar"
+
+    if [ ! -f "$jar" ]; then
+        local url
+        status "Downloading APKEditor..."
+        url=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/REAndroid/APKEditor/releases/latest" \
+            | jq -r 'first(.assets[] | select(.name | endswith(".jar")) | .browser_download_url) // empty')
+        [ -n "$url" ] && curl -fsSL "$url" -o "$jar" \
+            || { error "Failed to download APKEditor"; exit 1; }
+    fi
+
+    status "Merging splits in $(basename "$apk_dir")..."
+    java -jar "$jar" m -i "$apk_dir" -o "$apk_dir/merged.apk" -f >>"$LOGFILE" 2>&1 \
+        || { error "Failed to merge splits in $(basename "$apk_dir")"; exit 1; }
+    rm -f "$apk_dir"/*.apk.bak
+    find "$apk_dir" -maxdepth 1 -name '*.apk' ! -name 'merged.apk' -delete
+    mv "$apk_dir/merged.apk" "$apk_dir/base.apk"
+}
+
+unpack_downloaded_apk() {
+    local i=$1
+    local dest=$2
+    local apk_dir="${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}"
+
+    if is_apk_bundle "$dest"; then
+        log "Extracting ${T_MODULE_NAME[$i]} APK from bundle..."
+        unzip -j -q "$dest" '*.apk' -d "$apk_dir" || { error "Failed to extract ${T_MODULE_NAME[$i]} APK"; exit 1; }
+        rm -f "$dest"
+        merge_apk_splits "$apk_dir"
+    else
+        mv "$dest" "$apk_dir/base.apk"
+    fi
+    sanitize_apk_pngs "$apk_dir/base.apk"
+}
+
 download_target_base_apk() {
     local i=$1
     local version=$2
-    local dest="$CURDIR/.module-build/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
+    local dest="$MODULEBUILDROOT/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
     local apk_dir="${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}"
 
     status "Downloading ${T_MODULE_NAME[$i]} APK"
     dl_target_apk "$i" "$version" "$dest"
 
-    if unzip -l -q "$dest" | grep -q apk; then
-        log "Extracting ${T_MODULE_NAME[$i]} APK from bundle..."
-        unzip -j -q "$dest" '*.apk' -d "$apk_dir" || { error "Failed to extract ${T_MODULE_NAME[$i]} APK"; exit 1; }
-        rm -f "$dest"
-    else
-        mv "$dest" "$apk_dir/base.apk"
-    fi
+    unpack_downloaded_apk "$i" "$dest"
 }
 
 version_is_higher() {
@@ -472,6 +546,11 @@ download_extra_patches() {
     local token=${PATCHES_TOKEN:-${GITHUB_TOKEN:-}}
     local meta asset_id asset_name
 
+    if [ "${USE_EXTRA_PATCHES:-true}" != "true" ]; then
+        warn "USE_EXTRA_PATCHES=false; building with the upstream patches only"
+        return 0
+    fi
+
     if [ -z "$token" ]; then
         error "Missing PATCHES_TOKEN. A token with read access to ${EXTRA_PATCHES_REPO} is required."
         exit 1
@@ -512,11 +591,13 @@ expand_targets_for_channels() {
     local p_package=("${T_PACKAGE[@]}") p_apk_dir=("${T_APK_DIR[@]}")
     local p_display=("${T_DISPLAY_NAME[@]}") p_uninstall=("${T_UNINSTALL_FIRST[@]}")
     local p_fallback=("${T_FALLBACK_VERSION[@]}")
+    local p_apkm_name=("${T_APKM_NAME[@]}") p_apkm_slug=("${T_APKM_SLUG[@]}")
 
     T_PACKAGE=() T_APK_DIR=() T_MODULE_ID=() T_MODULE_NAME=() T_MODULE_DESC=()
     T_UPDATE_JSON=() T_UPDATE_FILE=() T_UNINSTALL_FIRST=() T_LABEL=() T_DISPLAY_NAME=()
     T_FALLBACK_VERSION=() T_RESOLVED_VERSION=() T_FALLBACK_PREFERRED=() T_VERSION=()
     T_VERSIONCODE=() T_NAME=() T_MODULE_PATH=() T_CHANNEL=() T_PATCHES=()
+    T_APKM_NAME=() T_APKM_SLUG=()
 
     for c in "${!CH_NAME[@]}"; do
         local ch=${CH_NAME[$c]}
@@ -537,6 +618,8 @@ expand_targets_for_channels() {
             T_UPDATE_JSON[$j]="https://github.com/${RELEASE_REPO}/releases/latest/download/${apk_dir}-${ch}update.json"
             T_UNINSTALL_FIRST[$j]="${p_uninstall[$i]}"
             T_FALLBACK_VERSION[$j]="${p_fallback[$i]}"
+            T_APKM_NAME[$j]="${p_apkm_name[$i]:-}"
+            T_APKM_SLUG[$j]="${p_apkm_slug[$i]:-}"
             T_RESOLVED_VERSION[$j]=""
             T_FALLBACK_PREFERRED[$j]="false"
             T_MODULE_PATH[$j]="$MODULEBUILDROOT/${apk_dir}-${ch}"
@@ -814,17 +897,23 @@ prepare_workspace() {
     success "Workspace initialized"
 }
 
+# Overridden by pipelines whose CLI takes different flags (see tiktok.sh).
+list_compatible_versions() {
+    local i=$1 pkg=$2
+    java -jar "$CLI" list-patches \
+        -p "${T_PATCHES[$i]}" \
+        -b \
+        --filter-package-name="$pkg" \
+        --packages \
+        --versions 2>>"$LOGFILE"
+}
+
 resolve_supported_versions() {
     status "Resolving compatible app versions from patches..."
     for i in "${!T_PACKAGE[@]}"; do
         local pkg=${T_PACKAGE[$i]}
         local resolved_ver fallback_ver ver
-        resolved_ver=$(java -jar "$CLI" list-patches \
-            -p "${T_PATCHES[$i]}" \
-            -b \
-            --filter-package-name="$pkg" \
-            --packages \
-            --versions 2>>"$LOGFILE" | \
+        resolved_ver=$(list_compatible_versions "$i" "$pkg" | \
             awk '
                 /Compatible versions:/ { in_block=1; next }
                 in_block && /^[[:space:]]*$/ { in_block=0 }
@@ -868,7 +957,7 @@ download_base_apks() {
     local versions=() download_paths=()
     for i in "${!T_PACKAGE[@]}"; do
         versions[$i]=${T_VERSION[$i]}
-        download_paths[$i]="$CURDIR/.module-build/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
+        download_paths[$i]="$MODULEBUILDROOT/${T_APK_DIR[$i]}-${T_CHANNEL[$i]}-download.apk"
     done
 
     local j
@@ -888,15 +977,7 @@ download_base_apks() {
     done
 
     for i in "${!T_PACKAGE[@]}"; do
-        local dest=${download_paths[$i]}
-        local apk_dir="${T_MODULE_PATH[$i]}/${T_APK_DIR[$i]}"
-        if unzip -l -q "$dest" | grep -q apk; then
-            log "Extracting ${T_MODULE_NAME[$i]} APK from bundle..."
-            unzip -j -q "$dest" '*.apk' -d "$apk_dir" || { error "Failed to extract ${T_MODULE_NAME[$i]} APK"; exit 1; }
-            rm -f "$dest"
-        else
-            mv "$dest" "$apk_dir/base.apk"
-        fi
+        unpack_downloaded_apk "$i" "${download_paths[$i]}"
     done
     success "Downloaded APKs successfully"
 }
@@ -913,13 +994,14 @@ delete_draft_and_prereleases() {
     local repo=$RELEASE_REPO
     local list_file rid tag rcode deleted=0
 
-    status "Deleting existing draft and pre-releases from ${repo}..."
+    status "Deleting existing draft and pre-releases matching ${RELEASE_TAG_RE:-.} from ${repo}..."
     list_file=$(mktemp)
     curl -sS \
         -H 'Accept: application/vnd.github+json' \
         -H "Authorization: token ${GITHUB_TOKEN}" \
         "https://api.github.com/repos/${repo}/releases?per_page=100" \
-        | jq -r '.[] | select(.draft or .prerelease) | [.id, .tag_name] | @tsv' >"$list_file"
+        | jq -r --arg re "${RELEASE_TAG_RE:-.}" \
+            '.[] | select(.draft or .prerelease) | select(.tag_name | test($re)) | [.id, .tag_name] | @tsv' >"$list_file"
 
     while IFS=$'\t' read -r rid tag; do
         [ -z "$rid" ] && continue
@@ -1089,7 +1171,7 @@ upload_release_assets_if_needed() {
         status "Uploading release assets..."
         for i in "${!T_PACKAGE[@]}"; do
             upload_release_file "$CURDIR/${T_NAME[$i]}.zip"
-            upload_release_file "$CURDIR/${T_NAME[$i]}-noroot.apk"
+            upload_release_file "$CURDIR/${T_NAME[$i]}${APK_SUFFIX}.apk"
             upload_release_file "$CURDIR/${T_UPDATE_FILE[$i]}"
         done
         upload_release_file "$CURDIR/changelog.md"
@@ -1268,21 +1350,19 @@ notify_telegram() {
 "
         for i in "${!T_PACKAGE[@]}"; do
             [ "${T_CHANNEL[$i]}" = "${CH_NAME[$c]}" ] || continue
-            apps="${apps}• <b>${T_DISPLAY_NAME[$i]} ${T_VERSION[$i]}</b> — <a href=\"${base}/${T_NAME[$i]}-noroot.apk\">APK</a> | <a href=\"${base}/${T_NAME[$i]}.zip\">ZIP</a>
+            apps="${apps}• <b>${T_DISPLAY_NAME[$i]} ${T_VERSION[$i]}</b> — <a href=\"${base}/${T_NAME[$i]}${APK_SUFFIX}.apk\">APK</a> | <a href=\"${base}/${T_NAME[$i]}.zip\">ZIP</a>
 "
         done
     done
 
-    caption="#DoraCore #ReVanced #YouTube #YTMusic #NoRoot #Magisk
-<b>ReVanced | YouTube &amp; YT Music</b>
+    caption="${POST_TAGS}
+<b>${POST_TITLE}</b>
 <b>Updated:</b> <i>${date_str}</i>
 
 📥 <b>Download:</b> <a href=\"https://github.com/${RELEASE_REPO}/releases/tag/${tag}\">Release</a>
 ${apps}
 <blockquote><b>Caution:</b>
-• APK (no-root) requires <a href=\"https://github.com/ReVanced/GmsCore/releases/latest\">ReVanced MicroG</a>.
-• ZIP (root) — flash in Magisk, no reboot needed.
-• Disable YouTube auto-updates in Play Store.</blockquote>
+${POST_CAUTION}</blockquote>
 
 <b>Notes:</b>
 • <b>dev</b> = newest patches, • <b>stable</b> = released patches.
@@ -1299,7 +1379,7 @@ ${apps}
     if curl -sS --fail-with-body \
         --form-string chat_id="$chat" \
         -F parse_mode=HTML \
-        -F photo=@"$CURDIR/banner.png" \
+        -F photo=@"$POST_BANNER" \
         --form-string caption="$caption" \
         "https://api.telegram.org/bot${token}/sendPhoto" >>"$LOGFILE" 2>&1; then
         success "Posted release to Telegram ($chat)"

@@ -33,9 +33,19 @@ T_MODULE_DESC=() T_UPDATE_JSON=() T_UPDATE_FILE=() T_UNINSTALL_FIRST=()
 T_LABEL=() T_DISPLAY_NAME=() T_FALLBACK_VERSION=()
 T_RESOLVED_VERSION=() T_FALLBACK_PREFERRED=()
 T_VERSION=() T_VERSIONCODE=() T_NAME=() T_MODULE_PATH=()
-T_CHANNEL=() T_PATCHES=()
+T_CHANNEL=() T_PATCHES=() T_APKM_NAME=() T_APKM_SLUG=()
 
-# add_target DISPLAY PACKAGE APK_DIR UNINSTALL_FIRST [FALLBACK_VERSION]
+# Release/announcement identity for this pipeline.
+RELEASE_TAG_RE='^(test_)?[0-9]'
+APK_SUFFIX="-noroot"
+POST_BANNER="$CURDIR/banner.png"
+POST_TITLE="ReVanced | YouTube &amp; YT Music"
+POST_TAGS="#DoraCore #ReVanced #YouTube #YTMusic #NoRoot #Magisk"
+POST_CAUTION="• APK (no-root) requires <a href=\"https://github.com/ReVanced/GmsCore/releases/latest\">ReVanced MicroG</a>.
+• ZIP (root) — flash in Magisk, no reboot needed.
+• Disable YouTube auto-updates in Play Store."
+
+# add_target DISPLAY PACKAGE APK_DIR UNINSTALL_FIRST [FALLBACK_VERSION] [APKM_NAME] [APKM_SLUG]
 #   DISPLAY         - human-readable app name   (e.g. "YouTube", "YouTubeMusic")
 #   PACKAGE         - Android package name
 #   APK_DIR         - base-APK subdirectory     (e.g. "youtube", "youtube-music")
@@ -43,6 +53,7 @@ T_CHANNEL=() T_PATCHES=()
 #   FALLBACK_VERSION- preferred fallback version (used if higher than resolved)
 add_target() {
     local display=$1 pkg=$2 apk_dir=$3 uninstall=$4 fallback=${5:-}
+    local apkm_name=${6:-} apkm_slug=${7:-}
     local i=${#T_PACKAGE[@]}
     local label="Revanced${display/YouTube/YT}"    # e.g. "YouTubeMusic" → "RevancedYTMusic"
     T_PACKAGE[$i]="$pkg"
@@ -56,6 +67,8 @@ add_target() {
     T_UPDATE_JSON[$i]="https://github.com/shekhawat2/RevancedYT/releases/latest/download/${apk_dir}update.json"
     T_UNINSTALL_FIRST[$i]="$uninstall"
     T_FALLBACK_VERSION[$i]="$fallback"
+    T_APKM_NAME[$i]="$apkm_name"
+    T_APKM_SLUG[$i]="$apkm_slug"
     T_RESOLVED_VERSION[$i]=""
     T_FALLBACK_PREFERRED[$i]="false"
     T_MODULE_PATH[$i]="$MODULEBUILDROOT/${apk_dir}"
