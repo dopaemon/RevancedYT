@@ -86,7 +86,7 @@ default:
         exit 1
       fi
 
-# Test job — mirrors .github/workflows/test.yml
+# Test job — mirrors .github/workflows/build-youtube-test.yml
 revanced_test:
   stage: build
   script:
@@ -118,7 +118,7 @@ revanced_test:
       when: always
     - when: manual
 
-# Release job — mirrors .github/workflows/revanced.yml (scheduled + manual)
+# Release job — mirrors .github/workflows/build-youtube-release.yml (scheduled + manual)
 revanced_release:
   stage: release
   script:
