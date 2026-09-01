@@ -1,18 +1,19 @@
-# This is a basic workflow to help you get started with Actions
+# Builds YouTube and YT Music from the dev and stable patch channels,
+# publishes a GitHub release and announces it on Telegram.
 
-name: Revanced Test
+name: Build YouTube (Release)
 
 permissions:
   contents: write
 
 concurrency:
-  group: revanced-test-${{ github.ref }}
+  group: build-youtube-release-${{ github.ref }}
   cancel-in-progress: true
 
-# Allows you to run this workflow manually from the Actions tab
 on:
-  [push, workflow_dispatch]
-
+  workflow_dispatch:
+  schedule:
+    - cron: "30 1 * * 1"
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
@@ -38,7 +39,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('revanced.sh', '.github/workflows/test.yml', '.github/workflows/revanced.yml') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('revanced.sh', 'revanced-common.sh', '.github/workflows/build-youtube-release.yml') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
       - name: Start building
@@ -51,4 +52,4 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           FAST_BUILD: "true"
         run: |
-          ./revanced.sh test
+          ./revanced.sh

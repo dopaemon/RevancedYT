@@ -1,12 +1,13 @@
-# Test build of ReVanced TikTok - publishes a pre-release and posts to the CI channel.
+# Same build as the release workflow, but published as a pre-release and
+# announced in the CI channel.
 
-name: Revanced TikTok Test
+name: Build TikTok (Test)
 
 permissions:
   contents: write
 
 concurrency:
-  group: revanced-tiktok-test-${{ github.ref }}
+  group: build-tiktok-test-${{ github.ref }}
   cancel-in-progress: true
 
 on:
@@ -32,7 +33,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('tiktok.sh', 'revanced-common.sh', '.github/workflows/tiktok.yml', '.github/workflows/tiktok-test.yml') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('tiktok.sh', 'revanced-common.sh', '.github/workflows/build-tiktok-test.yml') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
       - name: Install Pillow

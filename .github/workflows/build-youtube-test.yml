@@ -1,24 +1,28 @@
-# Builds ReVanced TikTok (dev + stable patches) and announces it on Telegram.
+# Same build as the release workflow, but published as a pre-release and
+# announced in the CI channel.
 
-name: Revanced TikTok
+name: Build YouTube (Test)
 
 permissions:
   contents: write
 
 concurrency:
-  group: revanced-tiktok-${{ github.ref }}
+  group: build-youtube-test-${{ github.ref }}
   cancel-in-progress: true
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 2 * * 1"
 
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
+  # This workflow contains a single job called "build"
   build:
+    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
+    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout
         uses: actions/checkout@v3
         with:
@@ -27,18 +31,16 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: '21'
+          java-version: '17'
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('tiktok.sh', 'revanced-common.sh', '.github/workflows/tiktok.yml', '.github/workflows/tiktok-test.yml') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('revanced.sh', 'revanced-common.sh', '.github/workflows/build-youtube-test.yml') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
-      - name: Install Pillow
-        run: pip install --quiet pillow
       - name: Start building
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,4 +51,4 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           FAST_BUILD: "true"
         run: |
-          ./tiktok.sh
+          ./revanced.sh test
