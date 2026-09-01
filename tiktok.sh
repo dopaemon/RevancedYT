@@ -37,11 +37,12 @@ PATCHES_RELEASE_REPO=${PATCHES_RELEASE_REPO:-icysymmetra/tiktok-patches-for-morp
 PATCHES_RELEASE_TAG=${PATCHES_RELEASE_TAG:-latest}
 CLI_RELEASE_REPO=${CLI_RELEASE_REPO:-MorpheApp/morphe-cli}
 CLI_RELEASE_TAG=${CLI_RELEASE_TAG:-latest}
+# The private bundle is a ReVanced .rvp, which Morphe cannot read, so it is
+# applied in a second pass with the stock ReVanced CLI.
+RVCLI_RELEASE_REPO=${RVCLI_RELEASE_REPO:-ReVanced/revanced-cli}
+RVCLI_RELEASE_TAG=${RVCLI_RELEASE_TAG:-latest}
 # "SIM spoof" ships disabled; the reference build enables it.
 PATCH_ARGS=(-e "SIM spoof")
-# The Morphe patch bundle is not a ReVanced .rvp, so the private bundle,
-# which only carries YouTube patches anyway, cannot be applied here.
-USE_EXTRA_PATCHES=false
 
 # ---------------------------------------------------------------------------
 # Per-target arrays – populated by add_target() below.
@@ -136,7 +137,10 @@ build_tools() {
     CLI="$CURDIR/morphe-cli.jar"
     CLIVER=$(dl_release_asset "$CLI_RELEASE_REPO" "$CLI_RELEASE_TAG" "-all.jar" "$CLI")
     success "TikTok patches (${PATCHES_RELEASE_REPO}): ${CH_PATCHESVER[0]}"
+    RVCLI="$CURDIR/revanced-cli.jar"
+    RVCLIVER=$(dl_release_asset "$RVCLI_RELEASE_REPO" "$RVCLI_RELEASE_TAG" "-all.jar" "$RVCLI")
     success "Morphe CLI: ${CLIVER}"
+    success "ReVanced CLI: ${RVCLIVER}"
     sync_target_patches
 }
 
@@ -220,6 +224,34 @@ patch_main_apks() {
     done
 }
 
+# Second pass: the private .rvp bundle, applied to the Morphe output with the
+# stock ReVanced CLI. -b because the APK now carries our signature.
+apply_extra_patches() {
+    [ -n "${EXTRA_PATCHES:-}" ] || return 0
+    status "Applying the private patch bundle..."
+    for i in "${!T_PACKAGE[@]}"; do
+        local apk="${T_MODULE_PATH[$i]}/${T_MODULE_ID[$i]}.apk"
+        local out="${apk%.apk}-extra.apk"
+        if java -jar "$RVCLI" patch --purge \
+            -o "$out" \
+            -p "$EXTRA_PATCHES" -b \
+            --keystore="$KEYSTORE" \
+            --keystore-password="$KEYSTORE_PASSWORD" \
+            --keystore-entry-alias="$KEYSTORE_ALIAS" \
+            --keystore-entry-password="$KEYSTORE_ENTRY_PASSWORD" \
+            --force \
+            "$apk" >>"$LOGFILE" 2>&1 && [ -f "$out" ]; then
+            mv "$out" "$apk"
+            success "Private patches applied to ${T_MODULE_NAME[$i]}"
+        else
+            rm -f "$out"
+            error "Failed to apply the private patches to ${T_MODULE_NAME[$i]}"
+            tail -n 40 "$LOGFILE"
+            exit 1
+        fi
+    done
+}
+
 # The patched APK is installable as-is; publish it next to the Magisk module.
 create_noroot_apks() {
     status "Publishing standalone APKs..."
@@ -268,6 +300,7 @@ prepare_workspace
 resolve_supported_versions
 download_base_apks
 patch_main_apks
+apply_extra_patches
 prepare_release_meta
 create_release_if_needed
 create_module_zips
