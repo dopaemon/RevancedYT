@@ -32,10 +32,9 @@ PREFER_BUNDLE=true
 # De-Vanced patches (.mpp) driven by the Morphe CLI, both taken from their
 # latest release instead of being built from source.
 # De-Vanced dropped its TikTok patches in v1.2.0, so the bundle comes from a
-# dedicated TikTok patch set instead; it is pinned because every release only
-# targets a couple of TikTok versions.
+# dedicated TikTok patch set instead - always its latest release.
 PATCHES_RELEASE_REPO=${PATCHES_RELEASE_REPO:-icysymmetra/tiktok-patches-for-morphe}
-PATCHES_RELEASE_TAG=${PATCHES_RELEASE_TAG:-v0.7.0}
+PATCHES_RELEASE_TAG=${PATCHES_RELEASE_TAG:-latest}
 CLI_RELEASE_REPO=${CLI_RELEASE_REPO:-MorpheApp/morphe-cli}
 CLI_RELEASE_TAG=${CLI_RELEASE_TAG:-latest}
 # "SIM spoof" ships disabled; the reference build enables it.
@@ -98,7 +97,8 @@ add_target() {
 # ---------------------------------------------------------------------------
 # APKMirror lists TikTok under "tiktok", not under the package name, and the
 # search also returns TikTok Lite - pin the app slug.
-# The pinned patches target TikTok 46.2.3.
+# Fallback only: the version is normally resolved from the patch bundle, which
+# follows TikTok as the patch set is updated.
 add_target "TikTok" "com.zhiliaoapp.musically" "tiktok" "true" "46.2.3" "tiktok" "/tik-tok-including-musical-ly/"
 
 # Patch channels - every app is built once per channel.
