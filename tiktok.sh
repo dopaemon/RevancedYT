@@ -29,7 +29,7 @@ SANITIZE_PNGS=true
 PREFER_BUNDLE=true
 # ReVanced's own TikTok patches no longer apply to the versions APKMirror
 # lists, so TikTok is patched the way mentalblank/Tiktok-Revanced does it:
-# De-Vanced patches (.mpp) driven by the Morphe CLI, both taken from their
+# a dedicated TikTok patch set (.mpp) driven by the Morphe CLI, both taken from their
 # latest release instead of being built from source.
 # De-Vanced dropped its TikTok patches in v1.2.0, so the bundle comes from a
 # dedicated TikTok patch set instead - always its latest release.
@@ -130,12 +130,12 @@ dl_release_asset() {
 }
 
 build_tools() {
-    status "Fetching De-Vanced patches and the Morphe CLI..."
+    status "Fetching TikTok patches and the Morphe CLI..."
     CH_PATCHES[0]="$CURDIR/patches.mpp"
     CH_PATCHESVER[0]=$(dl_release_asset "$PATCHES_RELEASE_REPO" "$PATCHES_RELEASE_TAG" ".mpp" "${CH_PATCHES[0]}")
     CLI="$CURDIR/morphe-cli.jar"
     CLIVER=$(dl_release_asset "$CLI_RELEASE_REPO" "$CLI_RELEASE_TAG" "-all.jar" "$CLI")
-    success "De-Vanced patches: ${CH_PATCHESVER[0]}"
+    success "TikTok patches (${PATCHES_RELEASE_REPO}): ${CH_PATCHESVER[0]}"
     success "Morphe CLI: ${CLIVER}"
     sync_target_patches
 }
